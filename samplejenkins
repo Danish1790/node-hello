@@ -23,7 +23,6 @@ pipeline {
       steps {
         sh '''
           npm install
-          npm run build
         '''
       }
     }
@@ -82,4 +81,15 @@ pipeline {
             git config --global user.email "danish.asif.7190@gmail.com"
             git config --global user.name "danish1790"
             git add node-deployment.yaml
-            git commit -m "Update node
+            git commit -m "Update node image to $IMAGE_TAG [skip ci]"
+            git push origin main
+          '''
+        }
+      }
+    }
+
+    failure {
+      echo "Node.js build failed. Check logs."
+    }
+  }
+}
