@@ -1,0 +1,85 @@
+pipeline {
+  agent any
+  
+  tools {
+    nodejs "node-23" // 👈 This loads npm and node from the plugin
+  }
+
+  environment {
+    AWS_REGION = 'us-east-1'
+    ECR_REPO_NAME = 'node' // Node.js ECR repo name
+    ECR_REGISTRY = '975050228815.dkr.ecr.us-east-1.amazonaws.com'
+    IMAGE_TAG = "${env.BUILD_NUMBER}"
+  }
+
+  stages {
+    stage('Checkout Code') {
+      steps {
+        git credentialsId: 'ea6ae787-d6f7-4ab9-9418-ebaf1471d3fe', url: 'https://github.com/Danish1790/node-hello.git'
+      }
+    }
+
+    stage('Build Node.js App') {
+      steps {
+        sh '''
+          npm install
+          npm run build
+        '''
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh '''
+          docker build -t $ECR_REPO_NAME:$IMAGE_TAG .
+          docker tag $ECR_REPO_NAME:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG
+        '''
+      }
+    }
+
+    stage('Login to AWS ECR') {
+      steps {
+        withCredentials([[
+          $class: 'AmazonWebServicesCredentialsBinding',
+          credentialsId: 'aws-creds-id'
+        ]]) {
+          sh '''
+            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+          '''
+        }
+      }
+    }
+
+    stage('Push to ECR') {
+      steps {
+        sh '''
+          docker push $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Node.js image successfully pushed: $ECR_REPO_NAME:$IMAGE_TAG"
+
+      script {
+        withCredentials([usernamePassword(
+          credentialsId: 'ea6ae787-d6f7-4ab9-9418-ebaf1471d3fe',
+          usernameVariable: 'GIT_USER',
+          passwordVariable: 'GIT_TOKEN'
+        )]) {
+          sh '''
+            # Clone the k8s repo
+            rm -rf eks-terraform-5-microservices
+            git clone https://$GIT_USER:$GIT_TOKEN@github.com/Danish1790/eks-terraform-5-microservices.git
+
+            # Replace image line in node-deployment.yaml
+            cd eks-terraform-5-microservices/dev
+            sed -i "s|image: .*|image: $ECR_REGISTRY/$ECR_REPO_NAME:$IMAGE_TAG|" node-deployment.yaml
+
+            # Commit and push changes
+            git config --global user.email "danish.asif.7190@gmail.com"
+            git config --global user.name "danish1790"
+            git add node-deployment.yaml
+            git commit -m "Update node
